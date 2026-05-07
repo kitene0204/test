@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>하노이의 탑</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Noto Sans KR', sans-serif; }
+        
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20% { transform: translateX(-8px); }
+            40% { transform: translateX(8px); }
+            60% { transform: translateX(-4px); }
+            80% { transform: translateX(4px); }
+        }
+        .animate-shake {
+            animation: shake 0.4s ease-in-out;
+        }
+
+        /* 3D 느낌을 위한 커스텀 유틸리티 */
+        .wood-texture {
+            background-image: repeating-linear-gradient(
+                to right,
+                rgba(255,255,255,0.03) 0px,
+                rgba(255,255,255,0.03) 1px,
+                transparent 1px,
+                transparent 4px
+            );
+        }
+
+        /* 모바일 가로 모드 최적화 (높이가 낮고 가로로 긴 화면) */
+        @media (max-height: 600px) and (orientation: landscape) {
+            .landscape-layout {
+                flex-direction: row !important;
+                align-items: stretch !important;
+            }
+            .game-sidebar {
+                width: 280px !important;
+                justify-content: center !important;
+                height: 100% !important;
+            }
+            .game-header, .game-instructions {
+                display: none !important; /* 공간 절약을 위해 제목과 설명 숨김 */
+            }
+            .panel-container, .stats-container {
+                margin-bottom: 12px !important;
+                padding: 16px !important;
+            }
+            .panel-container {
+                flex-direction: column !important;
+                gap: 16px !important;
+            }
+            .panel-container > div {
+                width: 100% !important;
+                justify-content: space-between !important;
+            }
+            #board {
+                height: 100% !important;
+            }
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 h-[100dvh] flex flex-col items-center justify-center py-4 px-4 sm:p-8 overflow-hidden">
+    
+    <!-- 반응형 메인 레이아웃 래퍼 -->
+    <div class="landscape-layout w-full max-w-5xl h-full flex flex-col gap-2 sm:gap-4">
+        
+        <!-- Sidebar (가로 모드 시 좌측 영역, 세로 모드 시 상단) -->
+        <div class="game-sidebar flex flex-col shrink-0 w-full mx-auto max-w-3xl">
+            <!-- Header -->
+            <header class="game-header mb-4 sm:mb-8 text-center">
+                <h1 class="text-3xl sm:text-4xl md:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-cyan-400 drop-shadow-sm mb-2">하노이의 탑</h1>
+                <p class="text-slate-400 text-sm sm:text-base">퍼즐을 풀고 지혜를 증명하세요</p>
+            </header>
+
+            <!-- Control Panel -->
+            <div class="panel-container flex flex-col sm:flex-row items-center gap-4 sm:gap-6 mb-4 w-full bg-slate-800/80 p-4 sm:p-5 rounded-2xl border border-slate-700 backdrop-blur-sm shadow-xl">
+                <!-- 난이도 조절 (+ / - 버튼식) -->
+                <div class="flex items-center justify-between sm:justify-start gap-3 w-full sm:w-auto">
+                    <span class="font-semibold text-slate-300 whitespace-nowrap">난이도 (원판):</span>
+                    <div class="flex items-center bg-slate-900 rounded-lg p-1 border border-slate-700 shadow-inner">
+                        <button id="btn-diff-down" onclick="changeDifficulty(-1)" disabled class="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4 sm:w-5 sm:h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 12h-15" /></svg>
+                        </button>
+                        <span id="diskCountDisplay" class="w-8 sm:w-10 text-center font-bold text-indigo-400 text-lg sm:text-xl">3</span>
+                        <button id="btn-diff-up" onclick="changeDifficulty(1)" class="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4 sm:w-5 sm:h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="flex-grow hidden sm:block"></div>
+                
+                <!-- 액션 버튼 그룹 -->
+                <div class="grid grid-cols-4 sm:flex items-center gap-1 sm:gap-2 w-full sm:w-auto">
+                    <button id="btn-undo" onclick="undoMove()" disabled class="py-2 sm:py-2.5 px-1 sm:px-4 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4 sm:w-5 sm:h-5">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+                        </svg>
+                        <span class="text-[10px] sm:text-sm whitespace-nowrap font-bold">되돌리기</span>
+                    </button>
+                    <button id="btn-redo" onclick="redoMove()" disabled class="py-2 sm:py-2.5 px-1 sm:px-4 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4 sm:w-5 sm:h-5">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 15l6-6m0 0l-6-6m6 6H9a6 6 0 000 12h3" />
+                        </svg>
+                        <span class="text-[10px] sm:text-sm whitespace-nowrap font-bold">다시실행</span>
+                    </button>
+                    <button id="btn-hint" onclick="provideHint()" class="py-2 sm:py-2.5 px-1 sm:px-4 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4 sm:w-5 sm:h-5">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.82 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.496 1.509 1.333 1.509 2.316V18" />
+                        </svg>
+                        <span class="text-[10px] sm:text-sm whitespace-nowrap font-bold">힌트</span>
+                    </button>
+                    <button onclick="resetGame()" class="py-2 sm:py-2.5 px-1 sm:px-4 bg-rose-600 hover:bg-rose-500 text-white font-medium rounded-lg transition-colors flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4 sm:w-5 sm:h-5">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                        </svg>
+                        <span class="text-[10px] sm:text-sm whitespace-nowrap font-bold">초기화</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Stats -->
+            <div class="stats-container w-full flex justify-between bg-slate-800/80 p-3 sm:p-4 rounded-xl mb-2 sm:mb-6 shadow-lg border border-slate-700">
+                <div class="flex flex-col flex-1 text-center border-r border-slate-700">
+                    <span class="text-[10px] sm:text-xs text-slate-400 uppercase tracking-wider mb-1">이동 횟수</span>
+                    <span class="text-xl sm:text-2xl font-bold text-white font-mono" id="moves">0</span>
+                </div>
+                <div class="flex flex-col flex-1 text-center border-r border-slate-700">
+                    <span class="text-[10px] sm:text-xs text-slate-400 uppercase tracking-wider mb-1">최소 이동</span>
+                    <span class="text-xl sm:text-2xl font-bold text-indigo-400 font-mono" id="min-moves">7</span>
+                </div>
+                <div class="flex flex-col flex-1 text-center">
+                    <span class="text-[10px] sm:text-xs text-slate-400 uppercase tracking-wider mb-1">진행 시간</span>
+                    <span class="text-xl sm:text-2xl font-bold text-white font-mono" id="time">00:00</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Area (가로 모드 시 우측, 세로 모드 시 하단) -->
+        <div class="game-main flex flex-col flex-1 min-h-[240px] w-full mx-auto max-w-3xl">
+            <!-- Game Board (플렉스 박스를 통해 남는 세로 공간을 꽉 채움) -->
+            <div id="board" class="relative w-full flex-1 bg-gradient-to-b from-slate-800 to-slate-900 rounded-xl overflow-hidden shadow-2xl border border-slate-700 min-h-[220px]">
+                
+                <!-- Base (바닥) -->
+                <div class="absolute bottom-0 w-full h-[20px] bg-amber-900 rounded-b-xl border-t-2 border-amber-800 wood-texture"></div>
+                
+                <!-- Pegs (기둥) -->
+                <div class="absolute bottom-[20px] left-[16.66%] w-3 sm:w-4 h-[80%] bg-amber-800 -translate-x-1/2 rounded-t-full shadow-[inset_2px_0_4px_rgba(255,255,255,0.2),inset_-2px_0_4px_rgba(0,0,0,0.4)] wood-texture"></div>
+                <div class="absolute bottom-[20px] left-[50%] w-3 sm:w-4 h-[80%] bg-amber-800 -translate-x-1/2 rounded-t-full shadow-[inset_2px_0_4px_rgba(255,255,255,0.2),inset_-2px_0_4px_rgba(0,0,0,0.4)] wood-texture"></div>
+                <div class="absolute bottom-[20px] left-[83.33%] w-3 sm:w-4 h-[80%] bg-amber-800 -translate-x-1/2 rounded-t-full shadow-[inset_2px_0_4px_rgba(255,255,255,0.2),inset_-2px_0_4px_rgba(0,0,0,0.4)] wood-texture"></div>
+                
+                <!-- Disks (원판들이 생성될 공간) -->
+                <div id="disks-container" class="absolute inset-0 pointer-events-none"></div>
+                
+                <!-- Click Areas (터치/클릭 영역) -->
+                <div class="absolute inset-0 flex pointer-events-auto">
+                    <div class="flex-1 group cursor-pointer" onclick="handlePegClick(0)">
+                        <div id="peg-col-0" class="w-full h-full bg-white/0 group-hover:bg-white/5 transition-colors duration-200"></div>
+                    </div>
+                    <div class="flex-1 group cursor-pointer" onclick="handlePegClick(1)">
+                        <div id="peg-col-1" class="w-full h-full bg-white/0 group-hover:bg-white/5 transition-colors duration-200 border-x border-white/5"></div>
+                    </div>
+                    <div class="flex-1 group cursor-pointer" onclick="handlePegClick(2)">
+                        <div id="peg-col-2" class="w-full h-full bg-white/0 group-hover:bg-white/5 transition-colors duration-200"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Instructions -->
+            <div class="game-instructions shrink-0 mt-2 sm:mt-4 text-slate-400 text-[11px] sm:text-sm text-center max-w-lg px-2 sm:px-4 leading-relaxed bg-slate-800/50 p-2 sm:p-4 rounded-xl mx-auto">
+                <p><strong class="text-indigo-400">규칙:</strong> 한 번에 하나의 원판만 옮길 수 있으며, <span class="text-rose-400">큰 원판을 작은 원판 위에 올릴 수 없습니다.</span></p>
+            </div>
+        </div>
+        
+    </div>
+
+    <!-- Win Modal -->
+    <div id="win-modal" class="fixed inset-0 bg-slate-900/90 flex items-center justify-center z-50 hidden backdrop-blur-md">
+        <div class="bg-slate-800 p-8 rounded-2xl shadow-[0_0_40px_rgba(79,70,229,0.3)] border border-indigo-500/50 text-center max-w-sm w-full mx-4 transform scale-100 transition-transform">
+            <div class="text-7xl mb-4 animate-bounce">🏆</div>
+            <h2 class="text-3xl font-extrabold text-white mb-2">성공!</h2>
+            <p class="text-slate-300 mb-8">하노이의 탑을 정복했습니다.</p>
+            
+            <div class="flex justify-between bg-slate-900/80 rounded-xl p-5 mb-8 border border-slate-700">
+                <div class="text-center w-1/2 border-r border-slate-700">
+                    <div class="text-xs text-slate-400 mb-1">이동 횟수</div>
+                    <div class="text-2xl font-bold text-indigo-400 font-mono" id="win-moves">0</div>
+                </div>
+                <div class="text-center w-1/2">
+                    <div class="text-xs text-slate-400 mb-1">소요 시간</div>
+                    <div class="text-2xl font-bold text-green-400 font-mono" id="win-time">00:00</div>
+                </div>
+            </div>
+            
+            <button onclick="resetGame()" class="w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-all shadow-[0_0_15px_rgba(79,70,229,0.5)] hover:shadow-[0_0_25px_rgba(79,70,229,0.7)] hover:-translate-y-0.5">
+                새 게임 시작
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Game State
+        let numDisks = 3;
+        const maxDisksConfig = 8;
+        let pegs = [[], [], []];
+        let selectedPeg = null;
+        let moves = 0;
+        let timer = 0;
+        let interval = null;
+        let isPlaying = false;
+        const baseHeight = 20; // 바닥 높이 (px)
+
+        // Undo & Redo 상태 관리
+        let moveHistory = [];
+        let currentHistoryIndex = -1;
+
+        // 오디오 컨텍스트
+        let audioCtx = null;
+
+        // Colors for disks (작은 것부터 큰 것 순서)
+        const diskColors = [
+            'bg-rose-500',   // 1
+            'bg-orange-500', // 2
+            'bg-yellow-400', // 3
+            'bg-green-500',  // 4
+            'bg-teal-400',   // 5
+            'bg-blue-500',   // 6
+            'bg-indigo-500', // 7
+            'bg-purple-500'  // 8
+        ];
+
+        // 오디오 초기화 및 재생 함수 (Web Audio API)
+        function initAudio() {
+            if (!audioCtx) {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                if (AudioContext) {
+                    audioCtx = new AudioContext();
+                }
+            }
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        function playSound(type) {
+            if (!audioCtx) return;
+
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            const now = audioCtx.currentTime;
+
+            if (type === 'pickup') {
+                // 들어올릴 때 (가볍고 경쾌한 소리)
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(400, now);
+                osc.frequency.exponentialRampToValueAtTime(600, now + 0.1);
+                gainNode.gain.setValueAtTime(0.3, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+                osc.start(now);
+                osc.stop(now + 0.1);
+            } else if (type === 'drop') {
+                // 내려놓을 때 (묵직하고 짧은 소리)
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(300, now);
+                osc.frequency.exponentialRampToValueAtTime(150, now + 0.15);
+                gainNode.gain.setValueAtTime(0.4, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+                osc.start(now);
+                osc.stop(now + 0.15);
+            } else if (type === 'error') {
+                // 오류 (낮은 버저 소리)
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(150, now);
+                osc.frequency.linearRampToValueAtTime(100, now + 0.3);
+                gainNode.gain.setValueAtTime(0.3, now);
+                gainNode.gain.linearRampToValueAtTime(0.01, now + 0.3);
+                osc.start(now);
+                osc.stop(now + 0.3);
+            } else if (type === 'win') {
+                // 승리 (아르페지오 효과음)
+                const notes = [440, 554.37, 659.25, 880]; // A4, C#5, E5, A5
+                notes.forEach((freq, i) => {
+                    const noteOsc = audioCtx.createOscillator();
+                    const noteGain = audioCtx.createGain();
+                    noteOsc.connect(noteGain);
+                    noteGain.connect(audioCtx.destination);
+                    
+                    const startTime = now + i * 0.1;
+                    noteOsc.type = 'sine';
+                    noteOsc.frequency.setValueAtTime(freq, startTime);
+                    noteGain.gain.setValueAtTime(0.3, startTime);
+                    noteGain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.3);
+                    
+                    noteOsc.start(startTime);
+                    noteOsc.stop(startTime + 0.3);
+                });
+            }
+        }
+
+        // Initialization
+        window.onload = () => {
+            resetGame();
+            
+            // 화면 크기가 변할 때 원판 두께 및 위치 재계산
+            window.addEventListener('resize', () => {
+                renderBoard();
+            });
+        };
+
+        // 난이도(원판 개수) 증감 함수
+        function changeDifficulty(delta) {
+            const newVal = numDisks + delta;
+            // 3개에서 8개 사이일 때만 적용
+            if (newVal >= 3 && newVal <= maxDisksConfig) {
+                updateDifficulty(newVal);
+            }
+        }
+
+        function updateDifficulty(val) {
+            numDisks = parseInt(val);
+            document.getElementById('diskCountDisplay').innerText = numDisks;
+            document.getElementById('min-moves').innerText = Math.pow(2, numDisks) - 1;
+            
+            // + / - 버튼 활성화/비활성화 상태 업데이트
+            const btnDown = document.getElementById('btn-diff-down');
+            const btnUp = document.getElementById('btn-diff-up');
+            if(btnDown) btnDown.disabled = (numDisks <= 3);
+            if(btnUp) btnUp.disabled = (numDisks >= maxDisksConfig);
+
+            resetGame();
+        }
+
+        function resetGame() {
+            // Stop timer
+            if (interval) clearInterval(interval);
+            interval = null;
+            timer = 0;
+            moves = 0;
+            isPlaying = false;
+            selectedPeg = null;
+            
+            // 히스토리 초기화
+            moveHistory = [];
+            currentHistoryIndex = -1;
+            updateUndoRedoButtons();
+            
+            // Update UI
+            updateTimeDisplay();
+            document.getElementById('moves').innerText = moves;
+            document.getElementById('win-modal').classList.add('hidden');
+            
+            // Reset Pegs Array
+            pegs = [[], [], []];
+            // 원판 채우기 (큰 것부터 작은 것 순으로 Push -> 배열 끝이 가장 위쪽/작은 원판)
+            for (let i = numDisks; i >= 1; i--) {
+                pegs[0].push(i);
+            }
+            
+            createDisksDOM();
+            renderBoard();
+        }
+
+        function createDisksDOM() {
+            const container = document.getElementById('disks-container');
+            container.innerHTML = '';
+            
+            const minW = 12; // 최소 너비 (%)
+            const maxW = 32; // 최대 너비 (%)
+            
+            // 각 원판 DOM 요소 생성 (1번이 제일 작고, numDisks번이 제일 큼)
+            for (let d = 1; d <= numDisks; d++) {
+                const disk = document.createElement('div');
+                disk.id = `disk-${d}`;
+                
+                // 크기 계산
+                const widthPct = minW + ((d - 1) / (maxDisksConfig - 1)) * (maxW - minW);
+                
+                // h-[${diskHeight}px] 클래스 제거 (renderBoard에서 동적 할당)
+                disk.className = `absolute transform -translate-x-1/2 rounded-full border border-white/20 shadow-[0_4px_8px_rgba(0,0,0,0.4),inset_0_2px_4px_rgba(255,255,255,0.3)] transition-all duration-300 ease-in-out flex items-center justify-center text-[10px] font-bold text-white/50 ${diskColors[(d-1) % diskColors.length]}`;
+                
+                disk.style.width = `${widthPct}%`;
+                
+                container.appendChild(disk);
+            }
+        }
+
+        function renderBoard() {
+            // 보드 높이에 맞춰 원판 두께 동적 조절 (잘림 방지)
+            const board = document.getElementById('board');
+            let currentDiskHeight = 24; // 기본 두께
+            
+            if (board) {
+                const boardHeight = board.clientHeight;
+                // 위쪽 띄울 여유 공간 60px, 바닥 20px 제외한 사용 가능 공간
+                const availableHeight = boardHeight - baseHeight - 60; 
+                // 최대 8개가 쌓여도 넘치지 않도록 높이 계산 (최소 10px ~ 최대 24px)
+                currentDiskHeight = Math.max(10, Math.min(24, availableHeight / maxDisksConfig));
+            }
+
+            // 모든 원판의 위치 업데이트
+            for (let d = 1; d <= numDisks; d++) {
+                let pegIdx = -1;
+                let posIdx = -1;
+                
+                // 현재 원판이 어느 기둥의 몇 번째에 있는지 찾기
+                for (let p = 0; p < 3; p++) {
+                    const idx = pegs[p].indexOf(d);
+                    if (idx !== -1) {
+                        pegIdx = p;
+                        posIdx = idx;
+                        break;
+                    }
+                }
+                
+                const diskEl = document.getElementById(`disk-${d}`);
+                if (diskEl && pegIdx !== -1) {
+                    const isSelected = (selectedPeg === pegIdx && posIdx === pegs[pegIdx].length - 1);
+                    
+                    // 원판 두께 실시간 업데이트
+                    diskEl.style.height = `${currentDiskHeight}px`;
+
+                    // X 위치 (기둥의 중앙: 16.66%, 50%, 83.33%)
+                    const leftPct = (pegIdx * 33.333) + 16.666;
+                    diskEl.style.left = `${leftPct}%`;
+                    
+                    // Y 위치 (아래에서부터의 높이)
+                    if (isSelected) {
+                        // 선택된 경우 공중으로 띄움 (보드 상단 근처)
+                        diskEl.style.bottom = `calc(100% - ${currentDiskHeight + 20}px)`;
+                        diskEl.style.boxShadow = `0 15px 25px rgba(0,0,0,0.5), inset 0 2px 4px rgba(255,255,255,0.5)`;
+                        diskEl.style.zIndex = "10";
+                    } else {
+                        // 바닥(20px) + 쌓인 인덱스 * 원판 두께
+                        diskEl.style.bottom = `${baseHeight + (posIdx * currentDiskHeight)}px`;
+                        diskEl.style.boxShadow = `0 4px 8px rgba(0,0,0,0.4), inset 0 2px 4px rgba(255,255,255,0.3)`;
+                        diskEl.style.zIndex = posIdx; // 아래에 있는게 낮게
+                    }
+                }
+            }
+
+            // 기둥 배경 하이라이트 효과
+            for (let p = 0; p < 3; p++) {
+                const col = document.getElementById(`peg-col-${p}`);
+                if (selectedPeg === p) {
+                    col.classList.add('bg-indigo-500/10');
+                    col.classList.remove('bg-white/0');
+                } else {
+                    col.classList.remove('bg-indigo-500/10');
+                    col.classList.add('bg-white/0');
+                }
+            }
+        }
+
+        function handlePegClick(pegIndex) {
+            // 첫 클릭 시 오디오 초기화 및 타이머 시작
+            initAudio();
+            if (!isPlaying) {
+                startTimer();
+            }
+            
+            if (selectedPeg === null) {
+                // [1] 기둥을 선택하는 경우
+                if (pegs[pegIndex].length === 0) return; // 빈 기둥이면 무시
+                
+                selectedPeg = pegIndex;
+                playSound('pickup');
+                renderBoard();
+            } else {
+                // [2] 선택된 원판을 내려놓는 경우
+                if (selectedPeg === pegIndex) {
+                    // 같은 기둥을 클릭하면 선택 취소
+                    selectedPeg = null;
+                    playSound('drop');
+                    renderBoard();
+                    return;
+                }
+                
+                const movingDisk = pegs[selectedPeg][pegs[selectedPeg].length - 1]; // 선택된 기둥의 최상단 원판
+                const targetTopDisk = pegs[pegIndex].length > 0 ? pegs[pegIndex][pegs[pegIndex].length - 1] : null; // 타겟 기둥의 최상단 원판
+                
+                // 규칙 체크 (빈 기둥이거나, 이동할 원판이 타겟 최상단 원판보다 작아야 함)
+                if (targetTopDisk === null || movingDisk < targetTopDisk) {
+                    // 유효한 이동
+                    pegs[selectedPeg].pop();
+                    pegs[pegIndex].push(movingDisk);
+                    playSound('drop');
+                    
+                    // 히스토리 기록 (현재 인덱스 이후의 과거 기록은 삭제)
+                    if (currentHistoryIndex < moveHistory.length - 1) {
+                        moveHistory = moveHistory.slice(0, currentHistoryIndex + 1);
+                    }
+                    moveHistory.push({ from: selectedPeg, to: pegIndex });
+                    currentHistoryIndex++;
+                    
+                    moves++;
+                    document.getElementById('moves').innerText = moves;
+                    selectedPeg = null;
+                    
+                    updateUndoRedoButtons();
+                    renderBoard();
+                    checkWin();
+                } else {
+                    // 잘못된 이동 (오류 피드백)
+                    triggerError();
+                    selectedPeg = null;
+                    renderBoard();
+                }
+            }
+        }
+
+        function triggerError() {
+            playSound('error');
+            const board = document.getElementById('board');
+            board.classList.add('animate-shake');
+            setTimeout(() => {
+                board.classList.remove('animate-shake');
+            }, 400);
+        }
+
+        function undoMove() {
+            if (currentHistoryIndex < 0) return; // 되돌릴 수 없음
+            
+            initAudio();
+            const lastMove = moveHistory[currentHistoryIndex];
+            const diskToMove = pegs[lastMove.to].pop(); // 갔던 기둥에서 빼기
+            pegs[lastMove.from].push(diskToMove);       // 원래 기둥으로 넣기
+            
+            playSound('drop');
+            currentHistoryIndex--;
+            moves--;
+            document.getElementById('moves').innerText = moves;
+            
+            selectedPeg = null; // 선택 해제 상태로 되돌림
+            updateUndoRedoButtons();
+            renderBoard();
+        }
+
+        function redoMove() {
+            if (currentHistoryIndex >= moveHistory.length - 1) return; // 다시 실행할 수 없음
+            
+            initAudio();
+            currentHistoryIndex++;
+            const nextMove = moveHistory[currentHistoryIndex];
+            const diskToMove = pegs[nextMove.from].pop(); // 원래 기둥에서 빼기
+            pegs[nextMove.to].push(diskToMove);           // 갈 기둥으로 넣기
+            
+            playSound('drop');
+            moves++;
+            document.getElementById('moves').innerText = moves;
+            
+            selectedPeg = null;
+            updateUndoRedoButtons();
+            renderBoard();
+            checkWin(); // 다시 실행해서 게임이 끝날 수도 있음
+        }
+
+        function updateUndoRedoButtons() {
+            const btnUndo = document.getElementById('btn-undo');
+            const btnRedo = document.getElementById('btn-redo');
+            const btnHint = document.getElementById('btn-hint');
+            
+            if (btnUndo) btnUndo.disabled = (currentHistoryIndex < 0);
+            if (btnRedo) btnRedo.disabled = (currentHistoryIndex >= moveHistory.length - 1);
+            if (btnHint) btnHint.disabled = (pegs[2].length === numDisks); // 클리어 시 힌트 비활성화
+        }
+
+        function checkWin() {
+            // 3번째 기둥(인덱스 2)에 모든 원판이 모였는지 확인
+            if (pegs[2].length === numDisks) {
+                clearInterval(interval);
+                isPlaying = false;
+                playSound('win');
+                updateUndoRedoButtons(); // 클리어 상태에 맞춰 버튼 업데이트
+                
+                // 애니메이션이 끝난 후 모달 띄우기
+                setTimeout(() => {
+                    document.getElementById('win-modal').classList.remove('hidden');
+                    document.getElementById('win-moves').innerText = moves;
+                    document.getElementById('win-time').innerText = formatTime(timer);
+                }, 350); 
+            }
+        }
+
+        // --- 힌트(자동 모범 답안) 시스템 ---
+        function provideHint() {
+            // 게임이 시작되지 않았다면 오디오 초기화 및 타이머 시작
+            initAudio();
+            if (!isPlaying && moves === 0) startTimer();
+            
+            const nextMove = getNextOptimalMove();
+            if (!nextMove) return; // 이미 완료되었거나 이동할 수 없음
+            
+            // 힌트에 따라 원판 이동 처리
+            const diskToMove = pegs[nextMove.from].pop();
+            pegs[nextMove.to].push(diskToMove);
+            
+            playSound('drop');
+            
+            // 히스토리에 기록 (힌트 사용 후 되돌리기 가능)
+            if (currentHistoryIndex < moveHistory.length - 1) {
+                moveHistory = moveHistory.slice(0, currentHistoryIndex + 1);
+            }
+            moveHistory.push({ from: nextMove.from, to: nextMove.to });
+            currentHistoryIndex++;
+            
+            moves++;
+            document.getElementById('moves').innerText = moves;
+            selectedPeg = null;
+            
+            updateUndoRedoButtons();
+            renderBoard();
+            checkWin();
+        }
+
+        // 현재 보드 상태에서 목표를 달성하기 위한 가장 최적의 다음 이동을 찾는 함수
+        function getNextOptimalMove() {
+            // 가장 큰 원판(numDisks)부터 최종 목표 기둥(인덱스 2)으로 보내기 위해 재귀 추적
+            return findMove(numDisks, 2);
+        }
+
+        function findMove(disk, targetPeg) {
+            if (disk === 0) return null; // 더 이상 추적할 원판이 없으면 null
+            
+            let currentPeg = -1;
+            // 현재 타겟 원판이 몇 번째 기둥에 있는지 확인
+            for (let p = 0; p < 3; p++) {
+                if (pegs[p].includes(disk)) {
+                    currentPeg = p;
+                    break;
+                }
+            }
+            
+            if (currentPeg === targetPeg) {
+                // 현재 원판이 이미 올바른 목표 기둥에 있다면,
+                // 그 다음으로 작은 원판을 같은 목표 기둥 위에 쌓도록 지시
+                return findMove(disk - 1, targetPeg);
+            } else {
+                // 현재 원판을 목표 기둥으로 옮기려면, 
+                // 그보다 작은 원판들이 제 3의 임시 기둥(otherPeg)에 모두 치워져 있어야 함
+                let otherPeg = 3 - currentPeg - targetPeg; 
+                let moveForSmaller = findMove(disk - 1, otherPeg);
+                
+                if (moveForSmaller !== null) {
+                    // 작은 원판을 치우는 과정이 아직 남았다면 그 이동을 먼저 수행
+                    return moveForSmaller; 
+                } else {
+                    // 작은 원판들이 완벽하게 임시 기둥에 치워져 있다면, 드디어 현재 원판을 이동!
+                    return { from: currentPeg, to: targetPeg };
+                }
+            }
+        }
+        // ---------------------------------
+
+        function startTimer() {
+            isPlaying = true;
+            timer = 0;
+            interval = setInterval(() => {
+                timer++;
+                updateTimeDisplay();
+            }, 1000);
+        }
+
+        function updateTimeDisplay() {
+            document.getElementById('time').innerText = formatTime(timer);
+        }
+
+        function formatTime(t) {
+            const m = Math.floor(t / 60).toString().padStart(2, '0');
+            const s = (t % 60).toString().padStart(2, '0');
+            return `${m}:${s}`;
+        }
+    </script>
+</body>
+</html>
